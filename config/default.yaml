@@ -1,0 +1,141 @@
+# BfxSentry Agent 默认配置
+
+engine:
+  mode: dry-run          # dry-run | live
+  log_level: info        # debug | info | warn | error
+
+collector:
+  bitfinex:
+    base_url: https://api-pub.bitfinex.com
+    symbol: tBTCUSD
+    deriv_symbol: tBTCF0:USTF0
+    funding_symbol: fUSD
+    ws_url: wss://api-pub.bitfinex.com/ws/2
+  polymarket:
+    gamma_url: https://gamma-api.polymarket.com
+    clob_url: https://clob.polymarket.com
+
+smart_follow:
+  enabled: true
+  tick_interval: 180
+  entry_conditions:
+    min_score: 65
+    min_whales_aligned: 5
+    min_correlation: 0.5
+    position_confirm: true
+  exit_conditions:
+    score_drop_below: 45
+    whale_flip_count: 3
+    max_hold_hours: 24
+    trailing_stop_pct: 1.5
+  risk:
+    size_pct: 8
+    max_leverage: 2
+    stop_loss_pct: 2.0
+
+funding_arb:
+  enabled: true
+  tick_interval: 300
+  lend:
+    min_rate_percentile: 0.75
+    min_utilization: 0.80
+    min_spare_capacity: 0.15
+    lend_amount_pct: 25
+    preferred_period_days: 7
+    high_rate_period_days: 30
+    high_rate_threshold: 0.90
+  warning:
+    rate_spike_pct: 5
+    critical_utilization: 0.90
+  exit_conditions:
+    rate_drop_percentile: 0.30
+    supply_recovery_pct: 2
+
+liq_hunter:
+  enabled: true
+  tick_interval: 5
+  trend_follow:
+    min_intensity_pct: 0.85
+    min_dominance: 0.70
+    min_price_move_pct: 0.3
+    price_window_sec: 180
+  reversal:
+    min_intensity_pct: 0.95
+    price_stall_pct: 0.1
+    require_ob_confirm: true
+    ob_imbalance_threshold: 1.2
+  risk:
+    size_pct: 5
+    max_leverage: 3
+    trend_stop_pct: 0.5
+    reversal_stop_pct: 0.3
+    take_profit_pct: 1.0
+    cooldown_sec: 300
+
+ob_sniper:
+  enabled: true
+  tick_interval: 5
+  entry_conditions:
+    imbalance_buy: 1.5
+    imbalance_sell: 0.67
+    depth_range_pct: 0.5
+    require_flow_confirm: true
+    flow_buy_ratio: 0.60
+    flow_sell_ratio: 0.40
+    flow_window_sec: 60
+    wall_multiplier: 5
+    wall_break_price_pct: 0.1
+  risk:
+    size_pct: 5
+    max_leverage: 3
+    stop_loss_pct: 0.3
+    take_profit_pct: 0.5
+    signal_ttl_sec: 120
+    cooldown_sec: 120
+
+pm_hedge:
+  enabled: true
+  tick_interval: 15
+  signal_driven:
+    min_confidence: 20
+    min_edge_pct: 3
+    stake_usdc: 100
+  market_making:
+    min_spread_cents: 2
+    max_inventory_imbalance: 0.3
+    hedge_when_imbalance: 0.2
+  hedge:
+    delta: 0.5
+    bfx_instrument: tBTCF0:USTF0
+    max_bfx_position_btc: 0.1
+
+risk:
+  max_total_position_usd: 5000
+  max_daily_loss_usd: 200
+  max_daily_trades: 50
+  max_concurrent_positions: 3
+  conflict_resolution: conservative
+  same_direction_cooldown_sec: 300
+  opposite_signal_cooldown_sec: 60
+  max_slippage_pct: 0.1
+  order_type: limit
+  limit_offset_pct: 0.02
+  retry:
+    max_attempts: 3
+    backoff_ms: [1000, 3000, 5000]
+    on_max_retry: alert_and_skip
+  portfolio:
+    max_portfolio_var_pct: 3
+    var_confidence: 0.95
+    max_same_direction_pct: 70
+    circuit_breaker:
+      consecutive_losses: 5
+      loss_streak_usd: 300
+      cooldown_minutes: 60
+      action: pause_all
+    trading_hours:
+      enabled: false
+
+recorder:
+  enabled: true
+  retention_days: 30

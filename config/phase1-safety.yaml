@@ -1,0 +1,24 @@
+# Phase 1 安全覆盖 (前 2 周实盘)
+# 使用: sentry start --mode live --config config/phase1-safety.yaml
+
+risk:
+  max_total_position_usd: 2000
+  max_daily_trades: 15
+  max_concurrent_positions: 1
+  portfolio:
+    circuit_breaker:
+      consecutive_losses: 3
+      cooldown_minutes: 120
+
+smart_follow:
+  entry_conditions:
+    min_score: 70
+  risk:
+    size_pct: 5
+
+liq_hunter:
+  risk:
+    size_pct: 3
+
+pm_hedge:
+  enabled: false
