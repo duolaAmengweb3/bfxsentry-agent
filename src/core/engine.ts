@@ -9,6 +9,7 @@ import { portfolioFilter } from '../risk/portfolio-filter.js'
 import { updatePositionPrices, checkStopLossAndTakeProfit, restorePositions, closePositionDb, closeAllPositions, getPositions } from '../risk/position-manager.js'
 import { dryRunExecute } from '../executor/dry-run.js'
 import { liveExecute, liveClosePosition } from '../executor/bitfinex-trader.js'
+import { dryRunPmBet, livePmBet } from '../executor/polymarket.js'
 import { openPosition } from '../risk/position-manager.js'
 import { logDecision } from './decision-log.js'
 import { initRecorder, recordSnapshot, cleanOldSnapshots, closeRecorder } from './recorder.js'
@@ -139,7 +140,13 @@ async function runFullTick(cfg: AgentConfig) {
 
     if (riskResult.passed) {
       let result
-      if (cfg.engine.mode === 'live') {
+      const isPmBet = intent.meta?.pmBet === true
+      if (isPmBet) {
+        // PM bets use Polymarket executor, not Bitfinex
+        result = cfg.engine.mode === 'live'
+          ? await livePmBet(intent)
+          : dryRunPmBet(intent)
+      } else if (cfg.engine.mode === 'live') {
         result = await liveExecute(intent, cfg)
       } else {
         result = dryRunExecute(intent, snapshot)

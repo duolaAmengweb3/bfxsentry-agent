@@ -7,7 +7,7 @@ const STRATEGY_NAMES: Record<string, string> = {
   'funding-arb': '融资套利',
   'liq-hunter': '爆仓猎人',
   'ob-sniper': '盘口狙击',
-  'pm-hedge': 'PM 对冲',
+  'pm-hedge': 'PM 信号下注',
 }
 
 export async function strategyCommand(name?: string, options?: { config?: string }) {

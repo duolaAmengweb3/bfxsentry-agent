@@ -97,17 +97,9 @@ pm_hedge:
   enabled: true
   tick_interval: 15
   signal_driven:
-    min_confidence: 20
-    min_edge_pct: 3
-    stake_usdc: 100
-  market_making:
-    min_spread_cents: 2
-    max_inventory_imbalance: 0.3
-    hedge_when_imbalance: 0.2
-  hedge:
-    delta: 0.5
-    bfx_instrument: tBTCF0:USTF0
-    max_bfx_position_btc: 0.1
+    min_confidence: 35       # Backtested optimal: 35% = 55.6% accuracy on 4h horizon
+    stake_usdc: 100          # Fixed stake per bet in USDC
+    horizon: 4h              # Target prediction horizon (for user reference)
 
 risk:
   max_total_position_usd: 5000

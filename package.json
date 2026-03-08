@@ -1,6 +1,6 @@
 {
   "name": "bfxsentry-agent",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "BfxSentry Agent CLI - Bitfinex signal-driven trading agent",
   "type": "module",
   "bin": {

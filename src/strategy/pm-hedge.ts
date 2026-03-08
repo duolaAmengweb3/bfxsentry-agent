@@ -2,7 +2,20 @@ import type { Signal } from '../signal/types.js'
 import type { TradeIntent } from './types.js'
 import type { AgentConfig } from '../core/config.js'
 import type { MarketSnapshot } from '../collector/types.js'
+import { signalSummary } from '../signal/index.js'
 
+/**
+ * PM Signal Bet — Signal-driven Polymarket auto-betting.
+ *
+ * Aggregates all BfxSentry signals into a directional view.
+ * When confidence exceeds the threshold (default 35%, backtested optimal),
+ * generates a bet intent for Polymarket BTC Up/Down markets.
+ *
+ * Backtest results (30 days, 4h horizon):
+ *   Conf ≥ 30%: 52.9% accuracy, +3.9% PM EV
+ *   Conf ≥ 35%: 55.6% accuracy, +9.1% PM EV
+ *   Conf ≥ 40%: 66.7% accuracy, +31.3% PM EV
+ */
 export function evaluatePmHedge(
   signals: Signal[],
   snapshot: MarketSnapshot,
@@ -11,55 +24,53 @@ export function evaluatePmHedge(
   const cfg = config.pm_hedge as Record<string, unknown>
   if (!cfg.enabled) return null
 
-  const signalDriven = cfg.signal_driven as Record<string, number>
-  const hedge = cfg.hedge as Record<string, unknown>
+  const signalCfg = cfg.signal_driven as Record<string, number>
+  const minConfidence = signalCfg.min_confidence ?? 35
 
-  // Aggregate all directional signals
-  let bullWeight = 0
-  let bearWeight = 0
-  for (const s of signals) {
-    if (s.direction === 'long') bullWeight += s.confidence
-    else if (s.direction === 'short') bearWeight += s.confidence
-  }
+  // Use the improved signalSummary which accounts for module coverage
+  const summary = signalSummary(signals)
 
-  const total = bullWeight + bearWeight
-  if (total === 0) return null
+  if (summary.direction === 'neutral') return null
+  if (summary.confidence < minConfidence) return null
 
-  const rawProb = bullWeight / total
-  // Compress towards 50%
-  const upProb = 0.5 + (rawProb - 0.5) * 0.6
-  const confidence = Math.abs(upProb - 0.5) * 200
-
-  if (confidence < signalDriven.min_confidence) return null
-
-  const direction = upProb > 0.55 ? 'long' : upProb < 0.45 ? 'short' : null
-  if (!direction) return null
-
-  // Calculate hedge position
+  const stakeUsdc = signalCfg.stake_usdc ?? 100
   const btcPrice = snapshot.ticker.lastPrice
-  const hedgeBtc = (signalDriven.stake_usdc * (hedge.delta as number)) / btcPrice
-  const maxBtc = hedge.max_bfx_position_btc as number
+
+  // Map signal direction to PM market outcome
+  // long signal → buy "BTC Up" Yes share
+  // short signal → buy "BTC Down" Yes share
+  const pmOutcome = summary.direction === 'long' ? 'BTC-Up-Yes' : 'BTC-Down-Yes'
+  const pmMarketType = summary.direction === 'long' ? '看涨' : '看跌'
+
+  // Build module breakdown for reason string
+  const dirSignals = signals.filter(s => s.direction !== 'neutral')
+  const moduleBreakdown = dirSignals.map(s =>
+    `${s.module}:${s.direction}(${s.confidence.toFixed(0)})`
+  ).join(', ')
 
   return {
     id: `pm-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
     strategy: 'pm-hedge',
-    direction,
-    instrument: hedge.bfx_instrument as string,
-    sizePct: 0, // PM hedge uses fixed USDC stake
+    direction: summary.direction,
+    instrument: `polymarket:${pmOutcome}`,
+    sizePct: 0, // PM uses fixed USDC stake, not percentage
     leverage: 1,
     entryPrice: btcPrice,
-    stopLossPct: 5, // wider stop for hedge
-    takeProfitPct: 10,
-    confidence,
-    reason: `PM 信号聚合 ${direction === 'long' ? '偏多' : '偏空'} ${(upProb * 100).toFixed(0)}%, 对冲 ${Math.min(hedgeBtc, maxBtc).toFixed(5)} BTC`,
-    signalIds: signals.filter(s => s.direction !== 'neutral').map(s => s.id),
+    stopLossPct: 0, // PM bets resolve at market close, no stop loss
+    takeProfitPct: 0, // Payout is binary: $1 or $0
+    confidence: summary.confidence,
+    reason: `PM 信号下注 ${pmMarketType}, 置信度 ${summary.confidence.toFixed(1)}%, ${summary.bullish} 多/${summary.bearish} 空信号 [${moduleBreakdown}]`,
+    signalIds: dirSignals.map(s => s.id),
     timestamp: Date.now(),
     meta: {
-      upProb,
-      confidence,
-      stakeUsdc: signalDriven.stake_usdc,
-      hedgeBtc: Math.min(hedgeBtc, maxBtc),
-      delta: hedge.delta,
+      pmBet: true,
+      pmOutcome,
+      stakeUsdc,
+      signalDirection: summary.direction,
+      signalConfidence: summary.confidence,
+      bullCount: summary.bullish,
+      bearCount: summary.bearish,
+      neutralCount: summary.neutral,
     },
   }
 }

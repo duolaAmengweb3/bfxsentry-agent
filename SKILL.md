@@ -71,7 +71,7 @@ sentry strategy smart-follow   # 聪明钱跟单策略详情
 sentry strategy liq-hunter     # 爆仓猎人策略详情
 sentry strategy ob-sniper      # 盘口狙击策略详情
 sentry strategy funding-arb    # 融资套利策略详情
-sentry strategy pm-hedge       # PM 对冲策略详情
+sentry strategy pm-hedge       # PM 信号下注策略详情
 ```
 
 **策略参数速查：**
@@ -82,7 +82,7 @@ sentry strategy pm-hedge       # PM 对冲策略详情
 | 融资套利 | FRR ≥P75, 利用率 ≥80% | 25% | 1x | 按费率回落退出 | 300s |
 | 爆仓猎人 | 强度 ≥P85, 单边 >70% | 5% | 3x | 0.5% / 1% | 5s |
 | 盘口狙击 | Bid/Ask ≥1.5x + 成交流确认 | 5% | 3x | 0.3% / 0.5% | 5s |
-| PM 对冲 | 聚合信心 ≥20%, 偏差 ≥3% | $100 | 1x | 5% / 10% | 15s |
+| PM 信号下注 | 聚合置信度 ≥35% (4h最优) | $100 USDC | 1x | 二元结算 | 15s |
 
 ---
 
