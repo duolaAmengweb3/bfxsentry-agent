@@ -9,6 +9,21 @@ let dailyPnl = 0
 let consecutiveLosses = 0
 let lossStreakUsd = 0
 let lastResetDate = ''
+let backtestMode = false
+
+export function setBacktestMode(enabled: boolean) {
+  backtestMode = enabled
+}
+
+export function resetForBacktest() {
+  positions.length = 0
+  dailyTrades = 0
+  dailyPnl = 0
+  consecutiveLosses = 0
+  lossStreakUsd = 0
+  lastResetDate = ''
+  backtestMode = true
+}
 
 // ── SQLite persistence ──
 const DB_PATH = getDbPath()
@@ -148,13 +163,13 @@ export function openPosition(intent: TradeIntent, result: ExecutionResult): Posi
     takeProfit: intent.direction === 'long'
       ? result.fillPrice * (1 + intent.takeProfitPct / 100)
       : result.fillPrice * (1 - intent.takeProfitPct / 100),
-    openedAt: Date.now(),
+    openedAt: intent.meta?.timestamp as number || Date.now(),
     highWatermark: result.fillPrice,
     trailingStopPct: intent.takeProfitPct,
   }
 
   positions.push(pos)
-  persistPositions()
+  if (!backtestMode) persistPositions()
   return pos
 }
 
@@ -181,7 +196,7 @@ export function closePosition(posId: string, exitPrice: number, reason: string):
   }
 
   positions.splice(idx, 1)
-  persistPositions()
+  if (!backtestMode) persistPositions()
   return pnl
 }
 

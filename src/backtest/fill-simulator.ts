@@ -23,7 +23,10 @@ export function simulateFill(intent: TradeIntent, snapshot: MarketSnapshot): Exe
   }
 
   const capitalUsd = 5000
-  const sizeUsd = capitalUsd * (intent.sizePct / 100)
+  // Support both percent-based and fixed-stake sizing
+  const sizeUsd = intent.sizePct > 0
+    ? capitalUsd * (intent.sizePct / 100)
+    : (intent.meta?.stakeUsdc as number) || (intent.meta?.hedgeBtc ? (intent.meta.hedgeBtc as number) * fillPrice : 100)
   const fillSize = sizeUsd / fillPrice
 
   return {

@@ -1,16 +1,13 @@
-import Database from 'better-sqlite3'
 import { generateAllSignals } from '../signal/index.js'
 import { evaluateAllStrategies } from '../strategy/index.js'
 import { strategyFilter } from '../risk/strategy-filter.js'
-import { portfolioFilter } from '../risk/portfolio-filter.js'
+import { portfolioFilter, resetCircuitBreaker } from '../risk/portfolio-filter.js'
 import { simulateFill } from './fill-simulator.js'
-import { openPosition, closePosition, checkStopLossAndTakeProfit, updatePositionPrices, getPositions } from '../risk/position-manager.js'
-import { getDbPath } from '../core/paths.js'
+import { openPosition, closePosition, checkStopLossAndTakeProfit, updatePositionPrices, getPositions, resetForBacktest } from '../risk/position-manager.js'
+import { clearCooldowns } from '../risk/cooldown.js'
+import { fetchHistoricalSnapshots } from './historical-fetcher.js'
 import type { AgentConfig } from '../core/config.js'
 import type { MarketSnapshot } from '../collector/types.js'
-import type { TradeIntent } from '../strategy/types.js'
-
-const DB_PATH = getDbPath()
 
 export interface BacktestResult {
   strategy: string | 'all'
@@ -45,17 +42,20 @@ export async function runBacktest(
   strategyFilter_: string | undefined,
   days: number,
 ): Promise<BacktestResult> {
-  const db = new Database(DB_PATH, { readonly: true })
+  // Reset all stateful modules for clean backtest
+  resetForBacktest()
+  resetCircuitBreaker()
+  clearCooldowns()
 
-  const cutoff = Date.now() - days * 86400_000
-  const rows = db.prepare(`
-    SELECT data_json, signals_json, timestamp FROM snapshots
-    WHERE timestamp >= ? ORDER BY timestamp ASC
-  `).all(cutoff) as { data_json: string; signals_json: string; timestamp: number }[]
+  // 从 Bitfinex API 直接拉取历史数据
+  const snapshots = await fetchHistoricalSnapshots(config, days, (p) => {
+    if (process.stderr.isTTY) {
+      process.stderr.write(`\r  ${p.phase}: ${p.detail}`)
+    }
+  })
+  if (process.stderr.isTTY) process.stderr.write('\n')
 
-  db.close()
-
-  if (rows.length === 0) {
+  if (snapshots.length === 0) {
     return emptyResult(strategyFilter_ || 'all', days)
   }
 
@@ -65,25 +65,38 @@ export async function runBacktest(
   let maxDrawdown = 0
   const returns: number[] = []
 
-  for (let i = 0; i < rows.length; i++) {
-    const snapshot = JSON.parse(rows[i].data_json) as MarketSnapshot
+  // Keep a map of position data for lookup after close
+  const positionCache = new Map<string, { strategy: string; direction: 'long' | 'short'; entryPrice: number; openedAt: number }>()
+
+  for (let i = 0; i < snapshots.length; i++) {
+    const snapshot = snapshots[i]
     const price = snapshot.ticker.lastPrice
 
     // Update positions
     updatePositionPrices(price)
 
+    // Cache current position data before SL/TP check (closePosition removes them)
+    for (const pos of getPositions()) {
+      positionCache.set(pos.id, {
+        strategy: pos.strategy,
+        direction: pos.direction,
+        entryPrice: pos.entryPrice,
+        openedAt: pos.openedAt,
+      })
+    }
+
     // Check stop loss / take profit
     const closed = checkStopLossAndTakeProfit(price)
     for (const c of closed) {
-      const pos = getPositions().find(p => p.id === c.posId)
+      const cached = positionCache.get(c.posId)
       trades.push({
         timestamp: snapshot.timestamp,
-        strategy: pos?.strategy || 'unknown',
-        direction: pos?.direction || 'long',
-        entryPrice: pos?.entryPrice || 0,
+        strategy: cached?.strategy || 'unknown',
+        direction: cached?.direction || 'long',
+        entryPrice: cached?.entryPrice || 0,
         exitPrice: price,
         pnl: c.pnl,
-        holdingMs: pos ? snapshot.timestamp - pos.openedAt : 0,
+        holdingMs: cached ? snapshot.timestamp - cached.openedAt : 0,
         reason: c.reason,
       })
       equity += c.pnl
@@ -98,8 +111,36 @@ export async function runBacktest(
       intents = intents.filter(i => i.strategy === strategyFilter_)
     }
 
+    // Close positions on reverse signal (backtest enhancement)
+    for (const intent of intents) {
+      const existingPositions = getPositions()
+      const reversePos = existingPositions.filter(
+        p => p.strategy === intent.strategy && p.direction !== intent.direction
+      )
+      for (const rp of reversePos) {
+        const cached = positionCache.get(rp.id)
+        const pnl = closePosition(rp.id, price, '反向信号平仓')
+        trades.push({
+          timestamp: snapshot.timestamp,
+          strategy: cached?.strategy || rp.strategy,
+          direction: cached?.direction || rp.direction,
+          entryPrice: cached?.entryPrice || rp.entryPrice,
+          exitPrice: price,
+          pnl,
+          holdingMs: cached ? snapshot.timestamp - cached.openedAt : 0,
+          reason: '反向信号平仓',
+        })
+        equity += pnl
+        returns.push(pnl / equity)
+      }
+    }
+
     // Risk filter + execute
     for (const intent of intents) {
+      // Inject timestamp for position tracking
+      if (!intent.meta) intent.meta = {}
+      intent.meta.timestamp = snapshot.timestamp
+
       const sf = strategyFilter(intent, config)
       if (!sf.passed) continue
       const pf = portfolioFilter(intent, config)
@@ -107,7 +148,15 @@ export async function runBacktest(
 
       const result = simulateFill(intent, snapshot)
       if (result.success) {
-        openPosition(intent, result)
+        const pos = openPosition(intent, result)
+        if (pos) {
+          positionCache.set(pos.id, {
+            strategy: pos.strategy,
+            direction: pos.direction,
+            entryPrice: pos.entryPrice,
+            openedAt: pos.openedAt,
+          })
+        }
       }
     }
 
@@ -118,7 +167,7 @@ export async function runBacktest(
   }
 
   // Close remaining positions at last price
-  const lastSnapshot = JSON.parse(rows[rows.length - 1].data_json) as MarketSnapshot
+  const lastSnapshot = snapshots[snapshots.length - 1]
   const remaining = getPositions()
   for (const pos of remaining) {
     const pnl = closePosition(pos.id, lastSnapshot.ticker.lastPrice, '回测结束')
@@ -147,11 +196,11 @@ export async function runBacktest(
   return {
     strategy: strategyFilter_ || 'all',
     period: {
-      start: rows[0].timestamp,
-      end: rows[rows.length - 1].timestamp,
+      start: snapshots[0].timestamp,
+      end: snapshots[snapshots.length - 1].timestamp,
       days,
     },
-    snapshotsUsed: rows.length,
+    snapshotsUsed: snapshots.length,
     trades,
     summary: {
       totalTrades: trades.length,

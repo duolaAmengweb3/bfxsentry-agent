@@ -46,7 +46,7 @@ function httpsGet(url: string, agent?: SocksProxyAgent): Promise<string> {
 
 const proxyAgent = createProxyAgent()
 
-async function fetchJson(url: string): Promise<unknown> {
+export async function fetchJson(url: string): Promise<unknown> {
   try {
     const raw = await httpsGet(url, useProxy ? proxyAgent : undefined)
     return JSON.parse(raw)

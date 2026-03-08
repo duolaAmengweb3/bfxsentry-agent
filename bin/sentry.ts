@@ -42,7 +42,7 @@ const program = new Command()
 program
   .name('sentry')
   .description('BfxSentry Agent CLI — Bitfinex 信号驱动交易代理')
-  .version('0.2.0')
+  .version('0.3.0')
 
 // ── sentry skills ──
 program

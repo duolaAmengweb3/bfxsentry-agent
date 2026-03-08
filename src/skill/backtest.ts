@@ -1,8 +1,8 @@
 import chalk from 'chalk'
 import { loadConfig } from '../core/config.js'
 import { initLogger } from '../core/logger.js'
-import { runBacktest } from '../backtest/runner.js'
-import { printBacktestReport } from '../backtest/report.js'
+import { runOptimizedBacktest } from '../backtest/optimizer.js'
+import { printOptimizeReport } from '../backtest/report.js'
 
 export async function backtestCommand(
   strategy: string | undefined,
@@ -12,8 +12,14 @@ export async function backtestCommand(
   const cfg = loadConfig(options.config)
   const days = parseInt(options.days || '7')
 
-  console.log(chalk.dim(`\n  回测中... 策略: ${strategy || 'all'}, 天数: ${days}\n`))
+  console.log(chalk.dim(`\n  自动调参回测中... 策略: ${strategy || 'all'}, 天数: ${days}\n`))
 
-  const result = await runBacktest(cfg, strategy, days)
-  printBacktestReport(result)
+  const result = await runOptimizedBacktest(cfg, strategy, days, (msg) => {
+    if (process.stderr.isTTY) {
+      process.stderr.write(`\r  ${chalk.dim(msg)}`)
+    }
+  })
+  if (process.stderr.isTTY) process.stderr.write('\r' + ' '.repeat(80) + '\r')
+
+  printOptimizeReport(result)
 }

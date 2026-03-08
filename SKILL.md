@@ -88,16 +88,15 @@ sentry strategy pm-hedge       # PM 对冲策略详情
 
 ### `sentry backtest`
 
-基于 SQLite 录制的市场快照回测策略。
+自动调参回测：直接从 Bitfinex API 拉取历史数据，遍历 225 种参数组合，输出最优配置。无需预录数据，即装即用。
 
 ```bash
-sentry backtest liq-hunter -d 7        # 回测爆仓策略 7 天
-sentry backtest smart-follow -d 30     # 回测聪明钱策略 30 天
-sentry backtest ob-sniper -d 14        # 回测盘口狙击 14 天
-sentry backtest -d 7                   # 回测所有策略 7 天
+sentry backtest -d 7                   # 回测所有策略 7 天 (默认)
+sentry backtest liq-hunter -d 7        # 只回测爆仓策略 7 天
+sentry backtest smart-follow -d 14     # 只回测聪明钱策略 14 天
 ```
 
-报告包含：胜率、总 PnL、平均 PnL、最大回撤、Sharpe Ratio。
+报告包含：默认参数 vs 最优参数对比、Top 5 参数排名、交易记录、胜率/PnL/Sharpe/最大回撤。
 
 ---
 
