@@ -11,9 +11,9 @@ export function generateLiquidationSignals(snapshot: MarketSnapshot): Signal[] {
   const dominance = liq5mTotal > 0 ? Math.max(w5m.longUsd, w5m.shortUsd) / liq5mTotal : 0
   const dominanceSide = w5m.longUsd >= w5m.shortUsd ? 'long' : 'short'
 
-  // Price change in 3 min window
+  // Price change in 3 min window (oldest trade in window vs current price)
   const recentTrades = trades.filter(t => t.timestamp >= now - 180_000)
-  const oldest = recentTrades.length > 0 ? recentTrades[recentTrades.length - 1].price : ticker.lastPrice
+  const oldest = recentTrades.length > 0 ? recentTrades[0].price : ticker.lastPrice
   const priceChange3m = oldest > 0 ? (ticker.lastPrice - oldest) / oldest : 0
 
   const pct = liqIntensityPct

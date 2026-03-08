@@ -196,6 +196,29 @@ function buildSnapshotFromCandle(
     t => t.timestamp >= windowStart && t.timestamp < windowEnd,
   )
 
+  // Inject synthetic trades that span the candle range so priceChange3m works.
+  // The signal module calculates 3-min price change from trades with timestamps
+  // within [now - 180_000, now]. With 1h candles, real trades may not cover this.
+  // We add a synthetic "old" trade at candle open and a "recent" trade at candle close
+  // so the signal sees a price move proportional to the candle's body.
+  const syntheticTrades: TradeEntry[] = [
+    ...windowTrades,
+    {
+      id: -2,
+      timestamp: candle.ts - 180_000 + 1000, // just after (now - 3min), signal sees it as "oldest recent trade"
+      amount: candle.volume * 0.01,
+      price: candle.open, // price "3 min ago" = candle open
+      side: candle.close >= candle.open ? 'buy' : 'sell',
+    },
+    {
+      id: -1,
+      timestamp: candle.ts - 1000, // just before snapshot.timestamp, signal sees it as "latest recent trade"
+      amount: candle.volume * 0.01,
+      price: candle.close, // current price = candle close
+      side: candle.close >= candle.open ? 'buy' : 'sell',
+    },
+  ]
+
   // TradeFlow — use actual trades if available, otherwise derive from candle
   const tradeFlow = windowTrades.length > 10
     ? buildTradeFlow(windowTrades)
@@ -260,16 +283,16 @@ function buildSnapshotFromCandle(
     })
   }
 
-  // Filter liquidations in window
+  // Filter liquidations in window (use 2h window for more data density)
   const windowLiqs = liqs.filter(
     l => l.timestamp >= candle.ts - 3600_000 && l.timestamp < windowEnd,
   )
 
-  // Liq aggregation
-  const liqAgg = buildLiqAgg(liqs, candle.ts)
+  // Liq aggregation — use 1h-based buckets so sparse data still shows signal
+  const liqAgg = buildLiqAggForBacktest(liqs, candle.ts)
 
-  // Liq intensity
-  const liqIntensityPct = calcLiqIntensityFromHistory(
+  // Liq intensity — use 1h buckets instead of 1m buckets
+  const liqIntensityPct = calcLiqIntensityHourly(
     liqs.filter(l => l.timestamp <= windowEnd),
     candle.ts,
   )
@@ -324,7 +347,7 @@ function buildSnapshotFromCandle(
     timestamp: candle.ts,
     ticker,
     orderbook,
-    trades: windowTrades,
+    trades: syntheticTrades,
     tradeFlow,
     liquidations: windowLiqs,
     liqAgg,
@@ -396,27 +419,54 @@ function buildLiqAgg(
   return { w1m: agg(60), w5m: agg(300), w15m: agg(900), w1h: agg(3600), w24h: agg(86400) }
 }
 
-function calcLiqIntensityFromHistory(liqs: LiquidationEntry[], refTs: number): number {
+/**
+ * Hourly-bucket intensity percentile for backtest.
+ * The real-time signal uses 1-minute buckets, but with sparse historical data
+ * most 1m buckets are 0, making percentile meaningless.
+ * Using 1h buckets matches our candle timeframe and gives realistic percentiles.
+ */
+function calcLiqIntensityHourly(liqs: LiquidationEntry[], refTs: number): number {
   if (liqs.length === 0) return 0
-  // Use last 24h of liqs for percentile calculation
-  const window24h = liqs.filter(l => l.timestamp >= refTs - 86400_000)
-  if (window24h.length === 0) return 0
+  const window = liqs.filter(l => l.timestamp >= refTs - 7 * 86400_000) // use full backtest range
+  if (window.length === 0) return 0
 
   const buckets: number[] = []
-  const start = window24h[0].timestamp
+  const start = window[0].timestamp
 
-  for (let t = start; t < refTs; t += 60_000) {
-    const bucket = window24h.filter(l => l.timestamp >= t && l.timestamp < t + 60_000)
+  // 1h buckets
+  for (let t = start; t < refTs; t += 3600_000) {
+    const bucket = window.filter(l => l.timestamp >= t && l.timestamp < t + 3600_000)
     buckets.push(bucket.reduce((s, l) => s + l.usdValue, 0))
   }
   if (buckets.length === 0) return 0
 
-  const currentBucket = window24h
-    .filter(l => l.timestamp >= refTs - 60_000 && l.timestamp <= refTs)
+  // Current hour's liquidation total
+  const currentBucket = window
+    .filter(l => l.timestamp >= refTs - 3600_000 && l.timestamp <= refTs)
     .reduce((s, l) => s + l.usdValue, 0)
   const sorted = [...buckets].sort((a, b) => a - b)
   const idx = sorted.findIndex(v => v >= currentBucket)
   return idx >= 0 ? idx / sorted.length : 1
+}
+
+/**
+ * Liq aggregation for backtest using wider windows.
+ * The signal module reads w5m for dominance, but with 1h candle intervals
+ * a 5-min window often captures 0 liqs. We map w5m → 1h window,
+ * w1m → 15min window, etc. to give the signal module useful data.
+ */
+function buildLiqAggForBacktest(
+  liqs: LiquidationEntry[],
+  refTs: number,
+): { w1m: LiquidationAgg; w5m: LiquidationAgg; w15m: LiquidationAgg; w1h: LiquidationAgg; w24h: LiquidationAgg } {
+  const agg = (sec: number): LiquidationAgg => {
+    const w = liqs.filter(l => l.timestamp >= refTs - sec * 1000 && l.timestamp <= refTs)
+    const longUsd = w.filter(l => l.side === 'long').reduce((s, l) => s + l.usdValue, 0)
+    const shortUsd = w.filter(l => l.side === 'short').reduce((s, l) => s + l.usdValue, 0)
+    return { longUsd, shortUsd, total: longUsd + shortUsd, count: w.length }
+  }
+  // Scale up windows: w1m→15min, w5m→1h, w15m→4h, w1h→8h, w24h→24h
+  return { w1m: agg(900), w5m: agg(3600), w15m: agg(14400), w1h: agg(28800), w24h: agg(86400) }
 }
 
 function sleep(ms: number): Promise<void> {
