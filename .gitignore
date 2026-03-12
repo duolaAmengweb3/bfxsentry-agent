@@ -1,7 +1,31 @@
+# Dependencies
 node_modules/
+
+# Build output
 dist/
+.next/
+out/
+
+# Data & DB
 data/
 *.db
 *.db-shm
 *.db-wal
 *.pid
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Logs
+*.log
